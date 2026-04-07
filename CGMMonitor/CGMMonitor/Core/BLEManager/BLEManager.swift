@@ -14,11 +14,11 @@ final class BLEManager: NSObject {
     static let shared = BLEManager()
     
     var centralManager: CBCentralManager!
-    var peripherals: CBPeripheral?
+    var peripheral: CBPeripheral?
     
-    private let gluecoseSubject = PassthroughSubject<CGFloat, Never>()
+    private let gluecoseSubject = PassthroughSubject<Int, Never>()
     
-    var gluecosePublisher: AnyPublisher<CGFloat, Never> {
+    var gluecosePublisher: AnyPublisher<Int, Never> {
         gluecoseSubject.eraseToAnyPublisher()
     }
     
@@ -33,6 +33,7 @@ final class BLEManager: NSObject {
     
 }
 
+// MARK: - CBCentralManagerDelegate
 extension BLEManager: CBCentralManagerDelegate {
     
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
@@ -43,4 +44,47 @@ extension BLEManager: CBCentralManagerDelegate {
             break
         }
     }
+    
+    func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String : Any], rssi RSSI: NSNumber) {
+        self.peripheral = peripheral
+        self.peripheral?.delegate = self
+        central.stopScan()
+        central.connect(peripheral)
+    }
+    
+    func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        peripheral.discoverServices([serviceUUID])
+    }
+}
+
+// MARK: - CBCentralManagerDelegate
+extension BLEManager: CBPeripheralDelegate {
+    
+    
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: (any Error)?) {
+        peripheral.services?.forEach {
+            peripheral.discoverCharacteristics([characteristicUUID], for: $0)
+        }
+    }
+    
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: (any Error)?) {
+        service.characteristics?.forEach {
+            if $0.uuid == characteristicUUID {
+                peripheral.setNotifyValue(true, for: $0)
+            }
+        }
+    }
+    
+    func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: (any Error)?) {
+        guard let data = characteristic.value else { return }
+        
+        let glucose = parseGlucose(data: data)
+        gluecoseSubject.send(glucose)
+    }
+    
+    private func parseGlucose(data: Data) -> Int {
+        // Example parsing (depends on device spec)
+        return Int(data.first ?? 0)
+    }
+    
 }
